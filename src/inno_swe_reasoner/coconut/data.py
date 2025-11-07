@@ -210,9 +210,9 @@ def tokenize_data(
     prompt: str = None,
     cot_steps: Optional[List[str]] = None,
     answer: Optional[str] = None,
+    max_length: int = 1028
 ) -> List[int]:
     """Tokenize a list of prompts."""
-    # Build assistant content
     assistant_parts = []
     if cot_steps:
         assistant_parts.append("\n".join(cot_steps))
@@ -243,7 +243,19 @@ def tokenize_data(
     else:
         user_ids = []
 
+    if max_length is not None and len(input_ids) > max_length:
+        assistant_length = len(input_ids) - len(user_ids)
+        
+        if assistant_length >= max_length:
+            user_ids = user_ids[:240] if len(user_ids) > 240 else user_ids
+            remaining = max_length - len(user_ids)
+            input_ids = user_ids + input_ids[len(user_ids):][:remaining]
+        else:
+            max_user_length = max_length - assistant_length
+            user_ids = user_ids[:max_user_length]
+            input_ids = input_ids[:max_user_length] + input_ids[len(user_ids):]
+
     # Create mask: 0 for user tokens, 1 for assistant tokens
     loss_mask = [False] * len(user_ids) + [True] * (len(input_ids) - len(user_ids))
 
-    return input_ids, loss_mask[1:]
+    return input_ids, loss_mask

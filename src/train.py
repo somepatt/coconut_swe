@@ -53,7 +53,7 @@ def train(config: CoconutTrainerConfig):
 
     # COCONUT Training
     step = 0
-    for stage in range(config.data.num_stages + 1):
+    for stage in range(1, config.data.num_stages + 1):
         if stage > 0:
             logger.info(f"Resetting optimizer at Stage {stage}")
             optimizer = setup_optimizer(config.optim, model)
@@ -61,6 +61,9 @@ def train(config: CoconutTrainerConfig):
         for epochs in range(config.data.epoch_per_stage):
             logger.info(f"Starting epoch {epochs} at stage {stage}")
             for batch in dataloader:
+                mem_allocated = torch.cuda.memory_allocated() / (1024**3)
+                mem_reserved = torch.cuda.memory_reserved() / (1024**3)
+                logger.info(f"GPU Memory: Allocated={mem_allocated:.2f}GB, Reserved={mem_reserved:.2f}GB")
                 step += 1
                 step_start_time = time.time()
                 batch_loss = 0.0
@@ -79,15 +82,17 @@ def train(config: CoconutTrainerConfig):
                     if stage == 0:
                         # Stage 0: Regular CoT training (no continuous thoughts)
                         input_ids, loss_mask = tokenize_data(
-                            tokenizer, prompt, cot_steps, answer
+                            tokenizer, prompt, cot_steps, answer, max_length=config.data.max_seq_length
                         )
-                        target_ids = (
-                            torch.tensor(input_ids.copy()[1:]).unsqueeze(0).to("cuda")
-                        )
+
+                        torch.cuda.empty_cache()
+                        
+                        target_ids = torch.tensor(input_ids.copy()[1:]).unsqueeze(0).to("cuda")
                         input_ids = torch.tensor(input_ids[:-1]).unsqueeze(0).to("cuda")
-                        loss_mask = torch.tensor(loss_mask).unsqueeze(0).to("cuda")
+                        loss_mask = torch.tensor(loss_mask[:-1]).unsqueeze(0).to("cuda")
+
                         position_ids = (
-                            torch.tensor(list(range(len(input_ids))))
+                            torch.tensor(list(range(input_ids.shape[1])))
                             .unsqueeze(0)
                             .to("cuda")
                         )
@@ -107,16 +112,19 @@ def train(config: CoconutTrainerConfig):
                         del input_ids
                         del position_ids
                         del target_ids
+                        torch.cuda.empty_cache()
 
                         loss = loss[loss_mask].mean()
                         batch_loss += loss
                         logger.debug(f"Example {idx} LOSS = {loss.item()}")
                     else:
                         input_ids, _ = tokenize_data(
-                            tokenizer=tokenizer, prompt=prompt + "<bot>"
+                            tokenizer=tokenizer, prompt=prompt + "<bot>", max_length=config.data.max_seq_length
                         )
                         input_ids = torch.tensor(input_ids).unsqueeze(0).to("cuda")
                         input_embed = model.get_embeddings(input_ids)
+
+                        torch.cuda.empty_cache()
 
                         # Generate continuous thoughts
                         num_continuous_thoughts = 2  # TODO: Remove this later.
@@ -183,28 +191,30 @@ def train(config: CoconutTrainerConfig):
                         del logits
                         del input_ids
                         del target_ids
+                        torch.cuda.empty_cache()
 
                         loss = loss[loss_mask].mean()
                         batch_loss += loss
+
                 # After processing all examples in batch:
                 batch_loss = batch_loss / config.data.gradient_accumulation_steps
                 batch_loss.backward()
-
-                if step % config.data.gradient_accumulation_steps == 0:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm=config.optim.max_norm
-                    )
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    torch.cuda.empty_cache()
+                
+                batch_loss_value = float(batch_loss.detach().item())
+                del batch_loss
                 
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=config.optim.max_norm
                 )
+                if step % config.data.gradient_accumulation_steps == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    torch.cuda.empty_cache()
+
                 step_time = time.time() - step_start_time
 
                 log_metrics = {
-                    "loss/batch_mean": batch_loss.item(),
+                    "loss/batch_mean": batch_loss_value,
                     "optim/grad_norm": grad_norm.item(),
                     "optim/learning_rate": optimizer.param_groups[0]["lr"],
                     "timing/step_time": step_time,
@@ -214,10 +224,8 @@ def train(config: CoconutTrainerConfig):
                 }
 
                 monitor.log(log_metrics)
-                step_message = f"Step {step} | Time: {step_time:.2f}s | Loss: {batch_loss.item():.4f} | Grad. Norm: {grad_norm:.4f}"
+                step_message = f"Step {step} | Time: {step_time:.2f}s | Loss: {batch_loss_value:.4f} | Grad. Norm: {grad_norm:.4f}"
                 logger.success(step_message)
-                optimizer.step()
-                optimizer.zero_grad()
 
         weightckpt_manager.save(model=model, step=step)
 

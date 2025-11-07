@@ -26,7 +26,7 @@ class ModelConfig(BaseConfig):
 
     attn: Annotated[
         AttnImplementation, Field(description="The attention implementation to use.")
-    ] = "flash_attention_2"
+    ] = "sdpa"
 
     quantization:  Annotated[
         Literal["4bit", "8bit", None],
@@ -140,11 +140,11 @@ SchedulerConfigType: TypeAlias = (
 
 
 class BaseOptimizerConfig(BaseModel):
-    lr: Annotated[float, Field(ge=0)] = 1e-6
+    lr: Annotated[float, Field(ge=0)] = 5e-5
     weight_decay: Annotated[float, Field(ge=0)] = 0.01
     max_norm: Annotated[
         float, Field(ge=0, description="Maximum gradient norm to clip.")
-    ] = 1.0
+    ] = 0.1
 
 
 class SGDConfig(BaseOptimizerConfig):

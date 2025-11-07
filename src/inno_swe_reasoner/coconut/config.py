@@ -15,13 +15,13 @@ class CoconutDataConfig(BaseConfig):
     # Split to use
     split: str = "train"
     # Maximum sequence length
-    max_seq_length: int = 2048
+    max_seq_length: int = 512
     # Number of samples to use (for debugging, None means all)
     num_samples: int | None = None
     # if to shuffle the dataset
     shuffle: bool = True
     # batch size
-    batch_size: int = 2
+    batch_size: int = 1
     # if to use mock data
     mock_data: bool = False
     # seed
@@ -34,7 +34,8 @@ class CoconutDataConfig(BaseConfig):
     # number of continuous thoughts per step
     c: int = 3
     epoch_per_stage: int = 2
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 20
+    quantization: str | None = "4bit"
 
 
 class CoconutTrainerConfig(BaseSettings):
