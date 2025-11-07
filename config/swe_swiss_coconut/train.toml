@@ -1,0 +1,14 @@
+[model]
+name = "Qwen/Qwen3-0.6B"
+
+[data]
+name = "SWE-Swiss/SWESwiss-SFT-Repair-4K"
+split = "train"
+mock_data = false
+num_samples = 2
+
+[wandb]
+project = "demo_with_small_model"
+
+[checkpoint]
+interval = 1

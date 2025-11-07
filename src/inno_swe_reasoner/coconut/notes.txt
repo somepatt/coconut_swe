@@ -1,0 +1,113 @@
+# Dataset format: [Prompt, CoT_steps, Answer]
+# where CoT_steps = [step1, step2, ..., stepN]
+
+# Training loop
+for stage in range(num_stages + 1):
+    for epoch in range(epochs_per_stage):
+        for datapoint in dataset:
+            # Prepare input based on current stage
+            if stage == 0:
+                # Stage 0: Regular CoT training
+                input_text = [Prompt, CoT_steps, Answer]
+                input_embeddings = embed_tokens(input_text)
+            else:
+                # Later stages: Replace first 'stage' steps with continuous thoughts
+                num_continuous_thoughts = stage * c  # c thoughts per removed step
+                remaining_cot = CoT_steps[stage:]  # Keep remaining steps
+                
+                # Start with prompt + <bot> token
+                input_embeddings = embed_tokens([Prompt, <bot>])
+                
+                # Generate continuous thoughts (n+1 forward passes for n thoughts)
+                for _ in range(num_continuous_thoughts):
+                    hidden_states = model(input_embeddings)
+                    last_hidden = hidden_states[:, -1, :]  # Get last hidden state
+                    # Feed it back as next input embedding (key innovation!)
+                    input_embeddings = torch.cat([input_embeddings, last_hidden.unsqueeze(1)], dim=1)
+                
+                # Add <eot> token and remaining CoT + Answer
+                eot_embedding = embed_tokens([<eot>])
+                remaining_text = embed_tokens(remaining_cot + [Answer])
+                input_embeddings = torch.cat([input_embeddings, eot_embedding, remaining_text], dim=1)
+            
+            # Final forward pass to compute loss
+            logits = model(input_embeddings)
+            
+            # Compute loss only on remaining CoT + Answer (mask prompt and continuous thoughts)
+            loss = compute_masked_loss(logits, targets, mask_positions=[prompt, continuous_thoughts])
+            
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+    
+    # Reset optimizer state when switching stages
+    if stage < num_stages:
+        optimizer = create_new_optimizer()  # Reset optimizer state
+        
+## V2
+# Dataset format: [Prompt, CoT_steps, Answer]
+# where CoT_steps = [step1, step2, ..., stepN]
+
+# Training loop
+for stage in range(num_stages + 1):
+    # Reset optimizer when switching stages (except at stage 0)
+    if stage > 0:
+        optimizer = create_new_optimizer()
+    
+    for epoch in range(epochs_per_stage):
+        for datapoint in dataset:
+            prompt, cot_steps, answer = datapoint
+            
+            # Determine how many steps to replace with continuous thoughts
+            steps_to_replace = min(stage, len(cot_steps))  # Handle shorter chains
+            num_continuous_thoughts = steps_to_replace * c  # c thoughts per step
+            remaining_cot = cot_steps[steps_to_replace:]  # Remaining language steps
+            
+            if stage == 0:
+                # Stage 0: Regular CoT training (no continuous thoughts)
+                input_ids = tokenize([prompt] + cot_steps + [answer])
+                input_embeddings = embed_tokens(input_ids)
+                
+                # Single forward pass
+                logits = model(input_embeddings)
+                loss = compute_loss(logits, targets, mask_prompt=True)
+                
+            else:
+                # Later stages: Use continuous thoughts
+                # Start with: [Prompt] + [<bot>]
+                input_ids = tokenize([prompt, '<bot>'])
+                input_embeddings = embed_tokens(input_ids)
+                
+                # Generate continuous thoughts (iterative forward passes)
+                for i in range(num_continuous_thoughts):
+                    hidden_states = model(input_embeddings)
+                    last_hidden = hidden_states[:, -1, :]  # Shape: [batch, hidden_dim]
+                    
+                    # KEY: Feed hidden state back as next input embedding
+                    # (Note: last_hidden is already normalized by final layer norm)
+                    input_embeddings = torch.cat([
+                        input_embeddings, 
+                        last_hidden.unsqueeze(1)
+                    ], dim=1)
+                
+                # Now append: [<eot>] + remaining_cot + [answer]
+                eot_and_remaining = tokenize(['<eot>'] + remaining_cot + [answer])
+                eot_and_remaining_embeddings = embed_tokens(eot_and_remaining)
+                
+                input_embeddings = torch.cat([
+                    input_embeddings, 
+                    eot_and_remaining_embeddings
+                ], dim=1)
+                
+                # Final forward pass to compute loss
+                logits = model(input_embeddings)
+                
+                # Mask loss on: prompt, <bot>, continuous thoughts, <eot>
+                # Compute loss only on: remaining_cot + answer
+                loss_start_idx = len(tokenize([prompt])) + 1 + num_continuous_thoughts + 1
+                loss = compute_masked_loss(logits, targets, start_idx=loss_start_idx)
+            
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
