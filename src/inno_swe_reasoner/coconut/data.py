@@ -210,7 +210,6 @@ def tokenize_data(
     prompt: str = None,
     cot_steps: Optional[List[str]] = None,
     answer: Optional[str] = None,
-    max_length: int = 2048
 ) -> List[int]:
     """Tokenize a list of prompts."""
     # Build assistant content
@@ -234,10 +233,7 @@ def tokenize_data(
         conversation=messages,
         add_generation_prompt=False,
     )
-
-    if len(input_ids) > max_length:
-        input_ids = input_ids[:max_length]
-
+    
     if prompt is not None:
         user_messages = [{"role": "user", "content": prompt}]
         user_ids = tokenizer.apply_chat_template(

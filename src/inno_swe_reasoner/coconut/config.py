@@ -11,7 +11,7 @@ class CoconutDataConfig(BaseConfig):
     """Configuration class for COCONUT SFT data processing."""
 
     # Name of the dataset on huggingface
-    name: str = "coconut_sft_dataset"
+    name: str = "SWE-Swiss/SWESwiss-SFT-Repair-4K"
     # Split to use
     split: str = "train"
     # Maximum sequence length
